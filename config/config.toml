@@ -1,0 +1,7 @@
+[config]
+
+
+
+[test]
+test_int=1
+test_str="asdawda"
