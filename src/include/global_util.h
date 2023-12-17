@@ -11,10 +11,10 @@
 #include "toml.hpp"
 
 // 运行模式----
-#define DEBUG
+#define DEBUG_MODE
 
 // 打印-------
-#ifdef DEBUG
+#ifdef DEBUG_MODE
 #define LOG(x) std::cout << "LOG: " << x << std::endl;
 #else
 #define LOG(x)
