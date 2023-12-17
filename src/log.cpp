@@ -1,4 +1,5 @@
 #include "log.h"
+#include "global_util.h"
 #include <cctype>
 #include <cstddef>
 #include <functional>
@@ -143,7 +144,8 @@ LogEvent::LogEvent(const char* file ,int32_t line,uint32_t elapse,uint32_t threa
 
 
 Logger::Logger(const std::string& name):m_name(name),m_level(Loglevel::DEBUG){
-    m_formatter.reset(new LogFormatter("%d [%p] %f %l %m %n"));
+    m_formatter.reset(new LogFormatter("%d %p %f %l %m %n"));
+    // m_formatter.reset(new LogFormatter("%d [%p] %f %l %m %n"));
 
 }
 void Logger::addAppender(LogAppender::ptr appender){
@@ -210,7 +212,7 @@ bool FileLogAppender::reopen(){
 }
 void StdoutLogAppender::log(Logger::ptr logger,Loglevel::Level level,LogEvent::ptr event){
     if (level>=m_level) {
-        std::cout <<m_formatter->format(logger,level,event);
+        println(m_formatter->format(logger,level,event));
     }
 }
 
@@ -228,73 +230,74 @@ std::string LogFormatter::format(Logger::ptr logger,Loglevel::Level level,LogEve
 
 // %xxx %xxx(xxx) %%
 void LogFormatter::init(){
-    // str,format,type
-    std::vector<std::tuple<std::string,std::string,int>>vec;//what?
-    std::string nstr;//what?
+    LOG("m_pattern=> "<< m_pattern)
+    std::vector<std::tuple<std::string,std::string,int>> vec;
+    std::string nstr;
     for (size_t i=0; i<m_pattern.size(); i++) {
-        if (m_pattern[i]=='%') {
-            nstr.append(1,m_pattern[i]);
+        if (m_pattern[i] != '%') {
+            nstr.append(1, m_pattern[i]);
             continue;
         }
 
-        if ((i+1)<m_pattern.size()) {
-            if (m_pattern[i+1]=='%') {
-                nstr.append(1,'%');
+        if ((i+1) < m_pattern.size()) {
+            if (m_pattern[i+1] == '%') {
+                nstr.append(1, '%');
+                i++; // skip the next '%'
                 continue;
             }
         }
 
-        size_t n=i+1;
-        int fmt_status=0;
-        size_t fmt_begin=0;
+        size_t n = i + 1;
+        int fmt_status = 0;
+        size_t fmt_begin = 0;
 
         std::string str;
         std::string fmt;
-        while (n<m_pattern.size()) {
-            if (!isalpha(m_pattern[n]) && m_pattern[n]!='{' && m_pattern[n]!='}') {
+        while (n < m_pattern.size()) {
+            if (!isalpha(m_pattern[n]) && m_pattern[n] != '{' && m_pattern[n] != '}') {
                 break;
             }
-            if (fmt_status==0) {
-                if (m_pattern[n]=='{') {
-                    str=m_pattern.substr(i+1,n-i-1);
-                    fmt_status=1;//解析格式
-                    fmt_begin=n;
+            if (fmt_status == 0) {
+                if (m_pattern[n] == '{') {
+                    str = m_pattern.substr(i+1, n-i-1);
+                    fmt_status = 1; // parsing format
+                    fmt_begin = n;
                     ++n;
                     continue;
                 }
             }
-            if (fmt_status==1) {
-                if (m_pattern[n]=='}') {
-                    fmt=m_pattern.substr(fmt_begin+1,n-fmt_begin-1);
-                    fmt_status=2;
+            if (fmt_status == 1) {
+                if (m_pattern[n] == '}') {
+                    fmt = m_pattern.substr(fmt_begin+1, n-fmt_begin-1);
+                    fmt_status = 2;
                     break;
                 }
             }
             ++n;
         }
 
-        if (fmt_status==0) {
+        if (fmt_status == 0) {
             if (!nstr.empty()) {
-                vec.push_back(make_tuple(nstr, std::string(),0));
+                vec.push_back(std::make_tuple(nstr, "", 0));
                 nstr.clear();
             }
-            str =m_pattern.substr(i+1,n-i-1);
-            vec.push_back(std::make_tuple(str,fmt,1));
-            i=n;
-        }else if (fmt_status==1) {
-            std::cout<<"pattern parse error: "<<m_pattern<<" - "<<m_pattern.substr(i) <<std::endl;
-            vec.push_back(std::make_tuple("<<pattern_error>>",fmt,0));
-        }else if (fmt_status==2) {
+            str = m_pattern.substr(i+1, n-i-1);
+            vec.push_back(std::make_tuple(str, fmt, 1));
+            i = n;
+        } else if (fmt_status == 1) {
+            std::cout << "pattern parse error: " << m_pattern << " - " << m_pattern.substr(i) << std::endl;
+            vec.push_back(std::make_tuple("<<pattern_error>>", fmt, 0));
+        } else if (fmt_status == 2) {
             if (!nstr.empty()) {
-                vec.push_back(std::make_tuple(nstr,"",0));
+                vec.push_back(std::make_tuple(nstr, "", 0));
                 nstr.clear();
             }
-            vec.push_back(std::make_tuple(str,fmt,1));
-            i=n;
+            vec.push_back(std::make_tuple(str, fmt, 1));
+            i = n;
         }
     }
     if (!nstr.empty()) {
-        vec.push_back(std::make_tuple(nstr, "",0));
+        vec.push_back(std::make_tuple(nstr, "", 0));
     }
     static std::map<std::string, std::function<FormatItem::ptr(const std::string& str)> > s_format_items={
 #define XX(str,C) \
@@ -311,20 +314,19 @@ void LogFormatter::init(){
 #undef XX
     };
 
-    for(auto &i:vec){
-        if (std::get<2>(i)==0) {
+    for(auto &i : vec){
+        if (std::get<2>(i) == 0) {
             m_items.push_back(FormatItem::ptr(new StringFormatItem(std::get<0>(i))));
-        }else {
-            auto it=s_format_items.find(std::get<0>(i));
-            if (it==s_format_items.end()) {
-                m_items.push_back(FormatItem::ptr(new StringFormatItem("<<error_format %"+std::get<0>(i)+">>")));
-            }else {
+        } else {
+            auto it = s_format_items.find(std::get<0>(i));
+            if (it == s_format_items.end()) {
+                m_items.push_back(FormatItem::ptr(new StringFormatItem("<<error_format %" + std::get<0>(i) + ">>")));
+            } else {
                 m_items.push_back(it->second(std::get<1>(i)));
             }
         }
-        std::cout<<"{"<<std::get<0>(i) <<"} - {" <<std::get<1>(i) <<"} - {" <<std::get<2>(i)<<"}" <<std::endl;
+        std::cout << "{" << std::get<0>(i) << "} - {" << std::get<1>(i) << "} - {" << std::get<2>(i) << "}" << std::endl;
     }
-    std::cout<< m_items.size()<<std::endl;
 
     //%m -- 消息体
     //%p -- level
